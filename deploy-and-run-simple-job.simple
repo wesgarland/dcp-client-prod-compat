@@ -1,0 +1,40 @@
+#! /usr/bin/env node
+/*
+ * @file        deploy-and-run-simple-job.simple  Smoke test for old dcp-client compat with in-dev
+                backend services
+
+ * @author      Severn Lortie, <severn@distributive.network>
+ * @date        November 2023
+ */
+const assert = require('node:assert/strict')
+const { createWorker } = require('./create-sa-worker') // this will get copied along with this file to a tmpdir
+async function doTest()
+{
+  // Assert we are actually running a release version of DCP-Client. This avoids any possible
+  // NPM shenanigans, e.g. grabbing from cache, wrong package.json, or just NPM being NPM
+  const buildInfo = require('dcp/build');
+  if (buildInfo.branch !== 'release')
+  {
+    console.error('Test will fail; must be on release branch of dcp-client, this is', buildInfo);
+    process.exitCode = 2;
+  }
+
+  const compute = require('dcp/compute');
+  const worker = await createWorker({ leavePublicGroup: true });
+
+  const job = compute.for(0, 25, (input) => {progress(input/100); return input * input});
+  job.computeGroups = [];
+  job.on('readystatechange', async (newState) => {
+    if (newState === 'deployed')
+    {
+      worker.workerOptions.jobAddresses.push(job.address);
+      await worker.start();
+    }
+  });
+  const results = await job.exec();
+  assert(results.length === 26);
+  for (let i = 0; i < results.length; i++)
+    assert(results[i] === i*i);
+  worker.stop(true);
+}
+require('dcp-client').init().then(doTest);
